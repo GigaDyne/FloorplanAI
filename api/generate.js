@@ -192,20 +192,6 @@ function chooseFootprint(totalSqft, requirements) {
   return { width, depth };
 }
 
-  let best = presets[0];
-  let bestDiff = Math.abs(totalSqft - presets[0].area);
-
-  for (const p of presets) {
-    const diff = Math.abs(totalSqft - p.area);
-    if (diff < bestDiff) {
-      best = p;
-      bestDiff = diff;
-    }
-  }
-
-  return { width: best.width, depth: best.depth };
-}
-
 function buildProgramPrompt(requirements, prompt) {
   return `
 You are extracting a residential room program from a user request.
@@ -330,7 +316,7 @@ function fallbackProgram(requirements) {
   for (let i = 1; i <= requirements.halfBathrooms; i += 1) {
     rooms.push({
       id: `half_bath_${i}`,
-      name: `Half Bath`,
+      name: "Half Bath",
       type: "half_bath",
       target_area: 36,
     });
@@ -408,34 +394,6 @@ function findRooms(program, predicate) {
   return program.rooms.filter(predicate);
 }
 
-function rectFromArea(name, id, type, targetArea, widthHint, x, y, maxWidth, maxDepth) {
-  let width = Math.max(6, Math.round(widthHint));
-  let depth = Math.max(6, Math.round(targetArea / width));
-
-  if (depth > maxDepth) {
-    depth = maxDepth;
-    width = Math.max(6, Math.round(targetArea / depth));
-  }
-
-  if (width > maxWidth) {
-    width = maxWidth;
-    depth = Math.max(6, Math.round(targetArea / width));
-  }
-
-  width = Math.min(width, maxWidth);
-  depth = Math.min(depth, maxDepth);
-
-  return {
-    id,
-    name,
-    type,
-    width,
-    depth,
-    x,
-    y,
-  };
-}
-
 function makeRoom(name, type, width, depth, x, y, id = null) {
   return {
     id: id || name.toLowerCase().replace(/\s+/g, "_"),
@@ -446,6 +404,27 @@ function makeRoom(name, type, width, depth, x, y, id = null) {
     x,
     y,
   };
+}
+
+function dedupeAndNormalizeRooms(rooms) {
+  const out = [];
+  const seen = new Set();
+
+  for (let i = 0; i < rooms.length; i += 1) {
+    const r = normalizeRoom(rooms[i], i);
+    let id = r.id;
+    let n = 2;
+
+    while (seen.has(id)) {
+      id = `${r.id}_${n}`;
+      n += 1;
+    }
+
+    seen.add(id);
+    out.push({ ...r, id });
+  }
+
+  return out;
 }
 
 function buildDeterministicPlan(requirements, program) {
@@ -471,7 +450,6 @@ function buildDeterministicPlan(requirements, program) {
 
   const sharedBaths = fullBathProgs.filter((r) => !masterBathProg || r.id !== masterBathProg.id);
 
-  // Reserved zones
   const leftW = 18;
   const centerW = 18;
   const rightW = W - leftW - centerW;
@@ -480,7 +458,6 @@ function buildDeterministicPlan(requirements, program) {
   const middleD = 16;
   const bottomD = D - topD - middleD;
 
-  // Top band: public zone only
   rooms.push(makeRoom(
     livingProg?.name || "Living Room",
     "living",
@@ -511,8 +488,6 @@ function buildDeterministicPlan(requirements, program) {
     diningProg?.id || "dining"
   ));
 
-  // Middle band: private rooms and hall
-  // Left section = master suite
   const masterBathH = masterBathProg ? 8 : 0;
   const masterBedH = middleD - masterBathH;
 
@@ -538,7 +513,6 @@ function buildDeterministicPlan(requirements, program) {
     ));
   }
 
-  // Center section = pantry + hallway + office
   const pantryH = pantryProg ? 6 : 0;
   const officeH = officeProg ? 6 : 0;
   const hallH = middleD - pantryH - officeH;
@@ -577,7 +551,6 @@ function buildDeterministicPlan(requirements, program) {
     ));
   }
 
-  // Right section = secondary bedrooms + baths
   const secondaryCount = bedroomProgs.length;
   const bedAreaW = Math.max(12, rightW - 8);
   const bathColW = rightW - bedAreaW;
@@ -625,7 +598,6 @@ function buildDeterministicPlan(requirements, program) {
     ));
   }
 
-  // Bottom band: patio left/center, garage right
   const garageW = garageProg ? Math.min(20, rightW) : 0;
   const garageX = W - garageW;
 
@@ -671,33 +643,12 @@ function buildDeterministicPlan(requirements, program) {
     total_depth: D,
     floors: 1,
     rooms: normalizedRooms,
-    doors: buildDoorsFromRooms(normalizedRooms, W, D),
+    doors: buildDoorsFromRooms(normalizedRooms),
     windows: buildWindowsFromRooms(normalizedRooms, W, D),
     notes:
       program.notes ||
       "Single-story conceptual layout with public spaces at the front, private rooms in the middle, and patio/garage at the rear.",
   };
-}
-
-function dedupeAndNormalizeRooms(rooms) {
-  const out = [];
-  const seen = new Set();
-
-  for (let i = 0; i < rooms.length; i += 1) {
-    const r = normalizeRoom(rooms[i], i);
-    let id = r.id;
-    let n = 2;
-
-    while (seen.has(id)) {
-      id = `${r.id}_${n}`;
-      n += 1;
-    }
-
-    seen.add(id);
-    out.push({ ...r, id });
-  }
-
-  return out;
 }
 
 function sharedWall(a, b) {
@@ -736,29 +687,29 @@ function shouldConnect(roomA, roomB) {
   const pair = [a, b].sort().join("|");
 
   const allowed = new Set([
-    "hallway|living",
-    "hallway|kitchen",
-    "hallway|dining",
-    "hallway|bedroom",
-    "hallway|master_bedroom",
-    "hallway|bathroom",
-    "hallway|half_bath",
-    "hallway|office",
-    "hallway|garage",
-    "hallway|pantry",
-    "hallway|patio",
-    "kitchen|pantry",
-    "kitchen|dining",
-    "living|dining",
-    "living|kitchen",
     "bathroom|bedroom",
     "bathroom|master_bedroom",
+    "dining|kitchen",
+    "dining|living",
+    "garage|hallway",
+    "hallway|bathroom",
+    "hallway|bedroom",
+    "hallway|dining",
+    "hallway|garage",
+    "hallway|half_bath",
+    "hallway|kitchen",
+    "hallway|living",
+    "hallway|master_bedroom",
+    "hallway|office",
+    "hallway|pantry",
+    "kitchen|living",
+    "kitchen|pantry",
   ]);
 
   return allowed.has(pair);
 }
 
-function buildDoorsFromRooms(rooms, totalWidth, totalDepth) {
+function buildDoorsFromRooms(rooms) {
   const doors = [];
 
   for (let i = 0; i < rooms.length; i += 1) {
@@ -863,30 +814,37 @@ function countPlanFeatures(rooms) {
       bedrooms += 1;
       continue;
     }
+
     if (type === "bedroom" || /\bbed(room)?\b/.test(name)) {
       bedrooms += 1;
       continue;
     }
+
     if (type === "half_bath" || name.includes("powder") || name.includes("half bath")) {
       halfBathrooms += 1;
       continue;
     }
+
     if (type === "bathroom" || /\bbath(room)?\b/.test(name)) {
       fullBathrooms += 1;
       continue;
     }
+
     if (type === "office" || name.includes("office") || name.includes("study")) {
       offices += 1;
       continue;
     }
+
     if (type === "pantry" || name.includes("pantry")) {
       pantries += 1;
       continue;
     }
+
     if (type === "patio" || name.includes("patio") || name.includes("porch")) {
       patios += 1;
       continue;
     }
+
     if (type === "garage" || name.includes("garage")) {
       garages += 1;
     }
