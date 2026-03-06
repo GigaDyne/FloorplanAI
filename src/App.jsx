@@ -131,14 +131,19 @@ export default function App() {
         throw new Error(data.error || 'Server error')
       }
 
+      setValidationIssues(Array.isArray(data.validationIssues) ? data.validationIssues : [])
+      setWasRepaired(Boolean(data.repaired))
+
       if (!data.plan) {
-        throw new Error('No plan was returned from the server.')
+        throw new Error(
+          data.validationIssues?.length
+            ? `Plan failed validation: ${data.validationIssues[0]}`
+            : 'No valid plan was returned from the server.'
+        )
       }
 
       setPlan(data.plan)
       setRawJson(JSON.stringify(data.plan, null, 2))
-      setValidationIssues(Array.isArray(data.validationIssues) ? data.validationIssues : [])
-      setWasRepaired(Boolean(data.repaired))
     } catch (e) {
       setError(e.message || 'Failed to generate floor plan. Please try again.')
     } finally {
@@ -371,6 +376,37 @@ export default function App() {
           </div>
         )}
 
+        {!!validationIssues.length && (
+          <div
+            style={{
+              background: '#fff8ec',
+              border: '1.5px solid #ecd8ae',
+              borderRadius: 12,
+              padding: 16,
+              marginBottom: 20,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "'DM Mono', monospace",
+                fontSize: 10,
+                color: '#b38a2f',
+                marginBottom: 10,
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+              }}
+            >
+              Validation Notes
+            </div>
+
+            <ul style={{ margin: 0, paddingLeft: 18, color: '#7a5a14', fontSize: 12, lineHeight: 1.55 }}>
+              {validationIssues.map((issue, idx) => (
+                <li key={`${issue}-${idx}`}>{issue}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {plan && (
           <div
             className="layout-grid"
@@ -468,36 +504,6 @@ export default function App() {
                 <StatRow label="Doors" value={plan.doors?.length || 0} />
                 <StatRow label="Repair Pass" value={wasRepaired ? 'Yes' : 'No'} />
               </div>
-
-              {!!validationIssues.length && (
-                <div
-                  style={{
-                    background: '#fff8ec',
-                    border: '1.5px solid #ecd8ae',
-                    borderRadius: 12,
-                    padding: 16,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontFamily: "'DM Mono', monospace",
-                      fontSize: 10,
-                      color: '#b38a2f',
-                      marginBottom: 10,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.1em',
-                    }}
-                  >
-                    Validation Notes
-                  </div>
-
-                  <ul style={{ margin: 0, paddingLeft: 18, color: '#7a5a14', fontSize: 12, lineHeight: 1.55 }}>
-                    {validationIssues.map((issue, idx) => (
-                      <li key={`${issue}-${idx}`}>{issue}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
 
               <div
                 style={{
