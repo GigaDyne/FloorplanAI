@@ -1,9 +1,5 @@
 // api/generate.js
-// Vercel Serverless Function - runs on the server, keeps ANTHROPIC_API_KEY secret
-
-export const config = {
-  runtime: 'edge', // Use edge runtime for fastest cold starts
-}
+// Vercel Serverless Function (Node.js runtime) - keeps ANTHROPIC_API_KEY secret
 
 const SYSTEM_PROMPT = `You are FloorPlanAI, an expert residential architect. Convert natural language house descriptions into precise JSON floor plan layouts.
 
@@ -44,22 +40,10 @@ Output this exact JSON structure:
     }
   ],
   "doors": [
-    {
-      "x": 10,
-      "y": 18,
-      "width": 3,
-      "wall": "bottom",
-      "connects": ["living", "kitchen"]
-    }
+    {"x": 10, "y": 18, "width": 3, "wall": "bottom", "connects": ["living", "kitchen"]}
   ],
   "windows": [
-    {
-      "x": 4,
-      "y": 0,
-      "length": 6,
-      "wall": "top",
-      "room": "living"
-    }
+    {"x": 4, "y": 0, "length": 6, "wall": "top", "room": "living"}
   ],
   "notes": "Brief layout description"
 }
@@ -68,49 +52,23 @@ Valid room types: living, kitchen, bedroom, master_bedroom, bathroom, garage, of
 
 Make the layout realistic and proportional. Total room areas should approximately match stated square footage.`;
 
-export default async function handler(req) {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    })
-  }
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'API key not configured on server.' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    console.error('ANTHROPIC_API_KEY is not set');
+    return res.status(500).json({ error: 'API key not configured on server.' });
   }
 
-  let body
-  try {
-    body = await req.json()
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
-  }
-
-  const { description } = body
+  const { description } = req.body || {};
   if (!description || typeof description !== 'string' || description.trim().length < 10) {
-    return new Response(JSON.stringify({ error: 'Please provide a house description.' }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return res.status(400).json({ error: 'Please provide a house description.' });
   }
 
   try {
@@ -127,44 +85,30 @@ export default async function handler(req) {
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: description.trim() }],
       }),
-    })
+    });
 
     if (!anthropicRes.ok) {
-      const errText = await anthropicRes.text()
-      console.error('Anthropic API error:', errText)
-      return new Response(JSON.stringify({ error: 'AI service error. Please try again.' }), {
-        status: 502,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      const errText = await anthropicRes.text();
+      console.error('Anthropic API error:', anthropicRes.status, errText);
+      return res.status(502).json({ error: `Anthropic API error ${anthropicRes.status}`, detail: errText });
     }
 
-    const data = await anthropicRes.json()
-    const text = data.content?.map((c) => c.text || '').join('') || ''
+    const data = await anthropicRes.json();
+    const text = data.content?.map((c) => c.text || '').join('') || '';
+    const clean = text.replace(/```json|```/g, '').trim();
 
-    // Clean and validate JSON
-    const clean = text.replace(/```json|```/g, '').trim()
-    let parsed
+    let parsed;
     try {
-      parsed = JSON.parse(clean)
-    } catch {
-      return new Response(JSON.stringify({ error: 'AI returned invalid layout. Please rephrase and try again.', raw: text }), {
-        status: 422,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      parsed = JSON.parse(clean);
+    } catch (e) {
+      console.error('JSON parse error:', e, text);
+      return res.status(422).json({ error: 'AI returned invalid layout. Please rephrase and try again.', raw: text });
     }
 
-    return new Response(JSON.stringify({ plan: parsed }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
-    })
+    return res.status(200).json({ plan: parsed });
+
   } catch (err) {
-    console.error('Handler error:', err)
-    return new Response(JSON.stringify({ error: 'Server error. Please try again.' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    console.error('Handler error:', err);
+    return res.status(500).json({ error: 'Server error: ' + err.message });
   }
 }
