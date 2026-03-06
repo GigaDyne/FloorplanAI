@@ -2,9 +2,9 @@ export const config = {
   runtime: "edge",
 };
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-3-haiku-20240307";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_URL = "https://api.openai.com/v1/responses";
+const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -23,28 +23,24 @@ function extractJson(text) {
 
   try {
     return JSON.parse(text);
-  } catch {
-    // keep going
-  }
+  } catch {}
 
-  const fencedMatch = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/```\s*([\s\S]*?)```/i);
+  const fencedMatch =
+    text.match(/```json\s*([\s\S]*?)```/i) ||
+    text.match(/```\s*([\s\S]*?)```/i);
+
   if (fencedMatch) {
     try {
       return JSON.parse(fencedMatch[1]);
-    } catch {
-      // keep going
-    }
+    } catch {}
   }
 
   const firstBrace = text.indexOf("{");
   const lastBrace = text.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    const maybeJson = text.slice(firstBrace, lastBrace + 1);
     try {
-      return JSON.parse(maybeJson);
-    } catch {
-      // keep going
-    }
+      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+    } catch {}
   }
 
   return null;
@@ -53,26 +49,6 @@ function extractJson(text) {
 function clampNumber(n, fallback = 0) {
   const v = Number(n);
   return Number.isFinite(v) ? v : fallback;
-}
-
-function normalizeRoom(room, index = 0) {
-  const width = Math.max(1, clampNumber(room.width, 0));
-  const depth = Math.max(1, clampNumber(room.depth, 0));
-  const x = Math.max(0, clampNumber(room.x, 0));
-  const y = Math.max(0, clampNumber(room.y, 0));
-  const name = String(room.name || room.id || `Room ${index + 1}`).trim();
-  const id = String(room.id || name.toLowerCase().replace(/\s+/g, "_") || `room_${index + 1}`);
-  const type = String(room.type || inferRoomType(name)).trim();
-
-  return {
-    id,
-    name,
-    width,
-    depth,
-    x,
-    y,
-    type,
-  };
 }
 
 function inferRoomType(name) {
@@ -93,6 +69,18 @@ function inferRoomType(name) {
   if (n.includes("powder") || n.includes("half")) return "half_bath";
   if (n.includes("bath")) return "bathroom";
   return "room";
+}
+
+function normalizeRoom(room, index = 0) {
+  const width = Math.max(1, clampNumber(room.width, 0));
+  const depth = Math.max(1, clampNumber(room.depth, 0));
+  const x = Math.max(0, clampNumber(room.x, 0));
+  const y = Math.max(0, clampNumber(room.y, 0));
+  const name = String(room.name || room.id || `Room ${index + 1}`).trim();
+  const id = String(room.id || name.toLowerCase().replace(/\s+/g, "_") || `room_${index + 1}`);
+  const type = String(room.type || inferRoomType(name)).trim();
+
+  return { id, name, width, depth, x, y, type };
 }
 
 function rectsOverlap(a, b) {
@@ -177,8 +165,6 @@ function extractRequirements(prompt) {
 }
 
 function countPlanFeatures(rooms) {
-  const names = rooms.map((r) => `${r.name} ${r.type}`.toLowerCase());
-
   let bedrooms = 0;
   let masterBedrooms = 0;
   let fullBathrooms = 0;
@@ -197,40 +183,32 @@ function countPlanFeatures(rooms) {
       bedrooms += 1;
       continue;
     }
-
     if (type === "bedroom" || /\bbed(room)?\b/.test(name)) {
       bedrooms += 1;
       continue;
     }
-
     if (type === "half_bath" || name.includes("powder") || name.includes("half bath")) {
       halfBathrooms += 1;
       continue;
     }
-
     if (type === "bathroom" || /\bbath(room)?\b/.test(name)) {
       fullBathrooms += 1;
       continue;
     }
-
     if (type === "office" || name.includes("office") || name.includes("study")) {
       offices += 1;
       continue;
     }
-
     if (type === "pantry" || name.includes("pantry")) {
       pantries += 1;
       continue;
     }
-
     if (type === "patio" || name.includes("patio") || name.includes("porch")) {
       patios += 1;
       continue;
     }
-
     if (type === "garage" || name.includes("garage")) {
       garages += 1;
-      continue;
     }
   }
 
@@ -243,7 +221,6 @@ function countPlanFeatures(rooms) {
     pantries,
     patios,
     garages,
-    names,
   };
 }
 
@@ -268,23 +245,14 @@ function validatePlan(plan, requirements) {
   const floors = clampNumber(plan.floors, 1);
   const roomsRaw = Array.isArray(plan.rooms) ? plan.rooms : [];
 
-  if (!totalWidth || !totalDepth) {
-    issues.push("Plan must include total_width and total_depth.");
-  }
-
-  if (!roomsRaw.length) {
-    issues.push("Plan must include at least one room.");
-  }
+  if (!totalWidth || !totalDepth) issues.push("Plan must include total_width and total_depth.");
+  if (!roomsRaw.length) issues.push("Plan must include at least one room.");
 
   const rooms = roomsRaw.map(normalizeRoom);
 
   for (const r of rooms) {
-    if (r.x + r.width > totalWidth) {
-      issues.push(`${r.name} extends beyond house width.`);
-    }
-    if (r.y + r.depth > totalDepth) {
-      issues.push(`${r.name} extends beyond house depth.`);
-    }
+    if (r.x + r.width > totalWidth) issues.push(`${r.name} extends beyond house width.`);
+    if (r.y + r.depth > totalDepth) issues.push(`${r.name} extends beyond house depth.`);
   }
 
   for (let i = 0; i < rooms.length; i += 1) {
@@ -300,35 +268,19 @@ function validatePlan(plan, requirements) {
   if (requirements.floors && floors !== requirements.floors) {
     issues.push(`Expected ${requirements.floors} floor(s), got ${floors}.`);
   }
-
   if (requirements.bedrooms !== null && counts.bedrooms !== requirements.bedrooms) {
     issues.push(`Expected ${requirements.bedrooms} bedrooms, got ${counts.bedrooms}.`);
   }
-
   if (requirements.fullBathrooms !== null && counts.fullBathrooms !== requirements.fullBathrooms) {
     issues.push(`Expected ${requirements.fullBathrooms} full bathrooms, got ${counts.fullBathrooms}.`);
   }
-
   if (requirements.halfBathrooms > 0 && counts.halfBathrooms < requirements.halfBathrooms) {
     issues.push(`Expected at least ${requirements.halfBathrooms} half bath, got ${counts.halfBathrooms}.`);
   }
-
-  if (requirements.hasOffice && counts.offices < 1) {
-    issues.push("Office requested but not included.");
-  }
-
-  if (requirements.hasPantry && counts.pantries < 1) {
-    issues.push("Pantry requested but not included.");
-  }
-
-  if (requirements.hasPatio && counts.patios < 1) {
-    issues.push("Patio requested but not included.");
-  }
-
-  if (requirements.garageCars > 0 && counts.garages < 1) {
-    issues.push("Garage requested but not included.");
-  }
-
+  if (requirements.hasOffice && counts.offices < 1) issues.push("Office requested but not included.");
+  if (requirements.hasPantry && counts.pantries < 1) issues.push("Pantry requested but not included.");
+  if (requirements.hasPatio && counts.patios < 1) issues.push("Patio requested but not included.");
+  if (requirements.garageCars > 0 && counts.garages < 1) issues.push("Garage requested but not included.");
   if (requirements.separatedMaster && counts.masterBedrooms < 1) {
     issues.push("Separated master bedroom requested but no master bedroom is labeled.");
   }
@@ -370,40 +322,36 @@ function buildSystemPrompt(requirements) {
   return `
 You are FloorPlanAI, an expert residential architect and space planner.
 
-Convert the user's request into a VALID JSON conceptual floor plan.
-
 Return ONLY valid JSON. No markdown. No explanation.
 
-Hard requirements:
-- Use a rectangular house footprint.
+Goal:
+Generate a conceptual residential floor plan as axis-aligned rectangles.
+
+Hard rules:
+- Use one rectangular house footprint.
 - All dimensions are in feet.
-- Rooms must be axis-aligned rectangles.
-- Rooms must NOT overlap.
-- Rooms must stay fully inside the house footprint.
-- The interior must be substantially partitioned; do not leave large unexplained empty voids.
-- Any leftover area over 80 sq ft must be explicitly labeled as hallway, foyer, circulation, open living area, or another named space.
-- Include every requested room/program element.
-- Enforce exact counts for bedrooms and full bathrooms.
-- Include half bath / powder room if requested.
+- Rooms must be rectangles.
+- Rooms must not overlap.
+- Rooms must stay inside the footprint.
+- Do not leave large unexplained empty areas.
+- Any significant leftover area must be labeled as hallway, foyer, circulation, or open area.
+- Include all requested spaces.
+- Match bedroom count exactly.
+- Match full bathroom count exactly.
+- Include half bath if requested.
 - Include office if requested.
 - Include pantry if requested.
-- Include garage if requested.
 - Include patio if requested.
-- Master bedroom must be separated from the other bedrooms if requested.
-- Secondary bedrooms should be grouped logically.
-- Pantry must be adjacent to kitchen.
-- Office should be near the front or off a hallway.
-- Garage should connect logically to mudroom, laundry, or hallway.
-- Public spaces should connect logically: kitchen, dining, living.
-- Every bedroom and office must have access to circulation without passing through another bedroom.
-- Prefer realistic room proportions. Avoid long skinny rooms.
-- Hallways should generally be at least 4 ft wide.
-- Total room area should be close to the requested target square footage.
+- Include garage if requested.
+- Master bedroom should be separated from the other bedrooms if requested.
+- Pantry should be adjacent to kitchen.
+- Public spaces should be logically grouped.
+- Avoid long skinny unrealistic rooms.
 
-Request summary:
+Requirements:
 ${JSON.stringify(requirements, null, 2)}
 
-Output this exact JSON structure:
+Return JSON in this shape:
 {
   "house_size": "2400 sqft",
   "total_width": 60,
@@ -424,16 +372,6 @@ Output this exact JSON structure:
   "windows": [],
   "notes": "Brief layout description"
 }
-
-Valid room types:
-living, kitchen, bedroom, master_bedroom, bathroom, half_bath, garage, office, hallway, pantry, dining, patio, mudroom, laundry, closet, foyer
-
-Before responding, internally verify:
-- no overlaps
-- all requested spaces included
-- no major empty voids
-- realistic adjacencies
-- exact requested room counts
 `.trim();
 }
 
@@ -451,50 +389,47 @@ Previous invalid JSON:
 ${JSON.stringify(failedPlan, null, 2)}
 
 Repair the plan and return ONLY valid JSON.
-Do not explain.
-Do not use markdown.
-Keep the same overall request, but fix the geometry and missing spaces.
+No markdown. No explanation.
 
-Requirements summary:
+Requirements:
 ${JSON.stringify(requirements, null, 2)}
 `.trim();
 }
 
-async function callAnthropic({ system, user }) {
-  const res = await fetch(ANTHROPIC_URL, {
+async function callOpenAI({ system, user }) {
+  const res = await fetch(OPENAI_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 4000,
-      temperature: 0.2,
-      system,
-      messages: [
+      input: [
+        {
+          role: "system",
+          content: [{ type: "input_text", text: system }],
+        },
         {
           role: "user",
-          content: user,
+          content: [{ type: "input_text", text: user }],
         },
       ],
+      text: {
+        format: { type: "text" },
+      },
+      reasoning: { effort: "low" },
+      max_output_tokens: 3000,
     }),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Anthropic API error (${res.status}): ${errText}`);
+    throw new Error(`OpenAI API error (${res.status}): ${errText}`);
   }
 
   const data = await res.json();
-  const text = Array.isArray(data.content)
-    ? data.content
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("\n")
-    : "";
-
+  const text = data.output_text || "";
   return text;
 }
 
@@ -502,11 +437,7 @@ async function generateAndValidate(prompt) {
   const requirements = extractRequirements(prompt);
   const system = buildSystemPrompt(requirements);
 
-  const firstText = await callAnthropic({
-    system,
-    user: prompt,
-  });
-
+  const firstText = await callOpenAI({ system, user: prompt });
   const firstPlan = extractJson(firstText);
   const firstValidation = validatePlan(firstPlan, requirements);
 
@@ -518,70 +449,59 @@ async function generateAndValidate(prompt) {
     };
   }
 
-  const repairPrompt = buildRepairPrompt(
-    prompt,
-    firstPlan,
-    firstValidation.issues,
-    requirements
-  );
-
-  const repairedText = await callAnthropic({
+  const repairedText = await callOpenAI({
     system,
-    user: repairPrompt,
+    user: buildRepairPrompt(prompt, firstPlan, firstValidation.issues, requirements),
   });
 
   const repairedPlan = extractJson(repairedText);
   const repairedValidation = validatePlan(repairedPlan, requirements);
 
-  if (repairedValidation.valid) {
+  const bestValidation =
+    repairedValidation.issues.length <= firstValidation.issues.length
+      ? repairedValidation
+      : firstValidation;
+
+  if (!bestValidation.valid) {
     return {
-      plan: repairedValidation.normalizedPlan,
-      validation: repairedValidation,
+      plan: null,
+      validation: bestValidation,
       repaired: true,
     };
   }
 
   return {
-    plan: repairedValidation.normalizedPlan || firstValidation.normalizedPlan || firstPlan,
-    validation: repairedValidation.issues.length <= firstValidation.issues.length
-      ? repairedValidation
-      : firstValidation,
+    plan: bestValidation.normalizedPlan,
+    validation: bestValidation,
     repaired: true,
   };
 }
 
 export default async function handler(req) {
-  if (req.method === "OPTIONS") {
-    return jsonResponse({}, 200);
-  }
+  if (req.method === "OPTIONS") return jsonResponse({}, 200);
+  if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 
-  if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
-  }
-
-  if (!ANTHROPIC_API_KEY) {
-    return jsonResponse(
-      { error: "Missing ANTHROPIC_API_KEY environment variable" },
-      500
-    );
+  if (!OPENAI_API_KEY) {
+    return jsonResponse({ error: "Missing OPENAI_API_KEY environment variable" }, 500);
   }
 
   try {
     const body = await req.json();
     const prompt = String(body?.prompt || "").trim();
 
-    if (!prompt) {
-      return jsonResponse({ error: "Missing prompt" }, 400);
-    }
+    if (!prompt) return jsonResponse({ error: "Missing prompt" }, 400);
 
     const result = await generateAndValidate(prompt);
 
     if (!result?.plan) {
       return jsonResponse(
         {
-          error: "Model returned no usable plan",
+          success: false,
+          repaired: result?.repaired || false,
+          validationIssues: result?.validation?.issues || ["Model returned no usable plan."],
+          plan: null,
         },
-        500
+        200
       );
     }
 
@@ -593,9 +513,7 @@ export default async function handler(req) {
     });
   } catch (error) {
     return jsonResponse(
-      {
-        error: error?.message || "Unexpected server error",
-      },
+      { error: error?.message || "Unexpected server error" },
       500
     );
   }
