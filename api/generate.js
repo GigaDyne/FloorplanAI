@@ -1,5 +1,4 @@
-// api/generate.js
-// Vercel Serverless Function (Node.js runtime) - keeps ANTHROPIC_API_KEY secret
+// api/generate.js — Vercel Serverless Function (CommonJS, Node.js runtime)
 
 const SYSTEM_PROMPT = `You are FloorPlanAI, an expert residential architect. Convert natural language house descriptions into precise JSON floor plan layouts.
 
@@ -29,30 +28,21 @@ Output this exact JSON structure:
   "total_depth": 50,
   "floors": 1,
   "rooms": [
-    {
-      "id": "living",
-      "name": "Living Room",
-      "width": 20,
-      "depth": 18,
-      "x": 0,
-      "y": 0,
-      "type": "living"
-    }
+    { "id": "living", "name": "Living Room", "width": 20, "depth": 18, "x": 0, "y": 0, "type": "living" }
   ],
   "doors": [
-    {"x": 10, "y": 18, "width": 3, "wall": "bottom", "connects": ["living", "kitchen"]}
+    { "x": 10, "y": 18, "width": 3, "wall": "bottom", "connects": ["living", "kitchen"] }
   ],
   "windows": [
-    {"x": 4, "y": 0, "length": 6, "wall": "top", "room": "living"}
+    { "x": 4, "y": 0, "length": 6, "wall": "top", "room": "living" }
   ],
   "notes": "Brief layout description"
 }
 
 Valid room types: living, kitchen, bedroom, master_bedroom, bathroom, garage, office, hallway, pantry, dining, patio, mudroom, laundry, closet
-
 Make the layout realistic and proportional. Total room areas should approximately match stated square footage.`;
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -94,21 +84,21 @@ export default async function handler(req, res) {
     }
 
     const data = await anthropicRes.json();
-    const text = data.content?.map((c) => c.text || '').join('') || '';
+    const text = (data.content || []).map((c) => c.text || '').join('');
     const clean = text.replace(/```json|```/g, '').trim();
 
     let parsed;
     try {
       parsed = JSON.parse(clean);
     } catch (e) {
-      console.error('JSON parse error:', e, text);
-      return res.status(422).json({ error: 'AI returned invalid layout. Please rephrase and try again.', raw: text });
+      console.error('JSON parse error:', e.message, '| Raw:', text.slice(0, 200));
+      return res.status(422).json({ error: 'AI returned invalid layout. Please rephrase and try again.' });
     }
 
     return res.status(200).json({ plan: parsed });
 
   } catch (err) {
-    console.error('Handler error:', err);
+    console.error('Handler error:', err.message);
     return res.status(500).json({ error: 'Server error: ' + err.message });
   }
-}
+};
