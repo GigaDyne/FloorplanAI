@@ -164,18 +164,33 @@ function extractRequirements(prompt) {
   };
 }
 
-function chooseFootprint(totalSqft) {
-  const presets = [
-    { width: 56, depth: 40, area: 2240 },
-    { width: 60, depth: 40, area: 2400 },
-    { width: 60, depth: 42, area: 2520 },
-    { width: 64, depth: 40, area: 2560 },
-    { width: 64, depth: 44, area: 2816 },
-    { width: 68, depth: 44, area: 2992 },
-    { width: 70, depth: 46, area: 3220 },
-    { width: 72, depth: 48, area: 3456 },
-    { width: 76, depth: 48, area: 3648 },
-  ];
+function chooseFootprint(totalSqft, requirements) {
+  let width = 64;
+  let depth = 50;
+
+  if (totalSqft <= 1800) {
+    width = 56;
+    depth = 42;
+  } else if (totalSqft <= 2200) {
+    width = 60;
+    depth = 46;
+  } else if (totalSqft <= 2600) {
+    width = 64;
+    depth = 50;
+  } else if (totalSqft <= 3200) {
+    width = 70;
+    depth = 50;
+  } else {
+    width = 72;
+    depth = 54;
+  }
+
+  if (requirements.hasPatio) depth += 4;
+  if (requirements.hasOffice) width += 2;
+  if (requirements.garageCars >= 2) width += 2;
+
+  return { width, depth };
+}
 
   let best = presets[0];
   let bestDiff = Math.abs(totalSqft - presets[0].area);
@@ -434,18 +449,8 @@ function makeRoom(name, type, width, depth, x, y, id = null) {
 }
 
 function buildDeterministicPlan(requirements, program) {
-  const { width: W, depth: D } = chooseFootprint(requirements.totalSqft);
+  const { width: W, depth: D } = chooseFootprint(requirements.totalSqft, requirements);
   const rooms = [];
-
-  const leftWingW = requirements.hasOffice ? 20 : 18;
-  const centerW = 16;
-  const rightWingW = 18;
-  const garageW = requirements.garageCars >= 2 ? 20 : 14;
-
-  const topPublicD = 18;
-  const patioD = requirements.hasPatio ? 12 : 0;
-  const garageD = requirements.garageCars >= 2 ? 20 : 18;
-  const officeD = requirements.hasOffice ? 10 : 0;
 
   const livingProg = findRoom(program, (r) => r.type === "living");
   const kitchenProg = findRoom(program, (r) => r.type === "kitchen");
@@ -466,22 +471,23 @@ function buildDeterministicPlan(requirements, program) {
 
   const sharedBaths = fullBathProgs.filter((r) => !masterBathProg || r.id !== masterBathProg.id);
 
-  const xLeft = 0;
-  const xCenter = leftWingW;
-  const xRight = leftWingW + centerW;
-  const xGarage = W - garageW;
+  // Reserved zones
+  const leftW = 18;
+  const centerW = 18;
+  const rightW = W - leftW - centerW;
 
-  const yTop = 0;
-  const yMid = topPublicD;
-  const yBottom = D - Math.max(garageD, patioD || 0);
+  const topD = 18;
+  const middleD = 16;
+  const bottomD = D - topD - middleD;
 
+  // Top band: public zone only
   rooms.push(makeRoom(
     livingProg?.name || "Living Room",
     "living",
-    leftWingW,
-    topPublicD,
-    xLeft,
-    yTop,
+    leftW,
+    topD,
+    0,
+    0,
     livingProg?.id || "living"
   ));
 
@@ -489,62 +495,34 @@ function buildDeterministicPlan(requirements, program) {
     kitchenProg?.name || "Kitchen",
     "kitchen",
     centerW,
-    topPublicD,
-    xCenter,
-    yTop,
+    topD,
+    leftW,
+    0,
     kitchenProg?.id || "kitchen"
   ));
 
-  const diningWidth = Math.max(10, rightWingW - (requirements.hasPatio ? 0 : 0));
   rooms.push(makeRoom(
     diningProg?.name || "Dining Room",
     "dining",
-    rightWingW,
-    topPublicD,
-    xRight,
-    yTop,
+    rightW,
+    topD,
+    leftW + centerW,
+    0,
     diningProg?.id || "dining"
   ));
 
-  const hallWidth = 6;
-  const hallX = leftWingW;
-  const hallY = topPublicD;
-  const hallDepth = D - topPublicD - (patioD > 0 ? patioD : 0);
+  // Middle band: private rooms and hall
+  // Left section = master suite
+  const masterBathH = masterBathProg ? 8 : 0;
+  const masterBedH = middleD - masterBathH;
 
-  rooms.push(makeRoom(
-    "Hallway",
-    "hallway",
-    hallWidth,
-    Math.max(8, hallDepth),
-    hallX,
-    hallY,
-    "hallway"
-  ));
-
-  const pantryWidth = requirements.hasPantry ? 8 : 0;
-  if (pantryProg && pantryWidth > 0) {
-    rooms.push(makeRoom(
-      pantryProg.name || "Pantry",
-      "pantry",
-      pantryWidth,
-      8,
-      xCenter,
-      topPublicD,
-      pantryProg.id || "pantry"
-    ));
-  }
-
-  const masterAreaStartY = topPublicD;
-  const masterAreaDepth = D - topPublicD - (requirements.hasOffice ? officeD : 0) - (patioD > 0 ? patioD : 0);
-
-  const masterBedDepth = Math.max(12, masterAreaDepth - (masterBathProg ? 10 : 0));
   rooms.push(makeRoom(
     masterProg?.name || "Master Bedroom",
     "master_bedroom",
-    leftWingW,
-    masterBedDepth,
-    xLeft,
-    masterAreaStartY,
+    leftW,
+    masterBedH,
+    0,
+    topD,
     masterProg?.id || "master_bedroom"
   ));
 
@@ -552,83 +530,124 @@ function buildDeterministicPlan(requirements, program) {
     rooms.push(makeRoom(
       masterBathProg.name || "Master Bath",
       "bathroom",
-      10,
-      10,
-      xLeft + leftWingW - 10,
-      masterAreaStartY + masterBedDepth,
+      leftW,
+      masterBathH,
+      0,
+      topD + masterBedH,
       masterBathProg.id || "master_bathroom"
     ));
   }
+
+  // Center section = pantry + hallway + office
+  const pantryH = pantryProg ? 6 : 0;
+  const officeH = officeProg ? 6 : 0;
+  const hallH = middleD - pantryH - officeH;
+
+  if (pantryProg) {
+    rooms.push(makeRoom(
+      pantryProg.name || "Pantry",
+      "pantry",
+      centerW,
+      pantryH,
+      leftW,
+      topD,
+      pantryProg.id || "pantry"
+    ));
+  }
+
+  rooms.push(makeRoom(
+    "Hallway",
+    "hallway",
+    centerW,
+    hallH,
+    leftW,
+    topD + pantryH,
+    "hallway"
+  ));
 
   if (officeProg) {
     rooms.push(makeRoom(
       officeProg.name || "Home Office",
       "office",
-      leftWingW - 2,
-      officeD,
-      xLeft,
-      D - officeD,
+      centerW,
+      officeH,
+      leftW,
+      topD + pantryH + hallH,
       officeProg.id || "office"
     ));
   }
 
-  const rightZoneY = topPublicD;
-  const bedBlockDepth = D - topPublicD - garageD;
+  // Right section = secondary bedrooms + baths
   const secondaryCount = bedroomProgs.length;
+  const bedAreaW = Math.max(12, rightW - 8);
+  const bathColW = rightW - bedAreaW;
 
-  if (secondaryCount === 1) {
-    rooms.push(makeRoom(
-      bedroomProgs[0].name || "Bedroom 1",
-      "bedroom",
-      rightWingW,
-      Math.max(12, bedBlockDepth),
-      xRight,
-      rightZoneY,
-      bedroomProgs[0].id || "bedroom_1"
-    ));
-  } else if (secondaryCount >= 2) {
-    const eachDepth = Math.max(10, Math.floor(bedBlockDepth / secondaryCount));
-    let currentY = rightZoneY;
+  if (secondaryCount >= 1) {
+    const eachBedH = Math.floor(middleD / secondaryCount);
+    let y = topD;
 
     for (let i = 0; i < secondaryCount; i += 1) {
-      const isLast = i === secondaryCount - 1;
-      const depth = isLast ? (bedBlockDepth - eachDepth * i) : eachDepth;
-
+      const h = i === secondaryCount - 1 ? (topD + middleD - y) : eachBedH;
       rooms.push(makeRoom(
         bedroomProgs[i].name || `Bedroom ${i + 1}`,
         "bedroom",
-        12,
-        depth,
-        xRight,
-        currentY,
+        bedAreaW,
+        h,
+        leftW + centerW,
+        y,
         bedroomProgs[i].id || `bedroom_${i + 1}`
       ));
-
-      currentY += depth;
+      y += h;
     }
   }
 
-  if (sharedBaths[0]) {
+  if (sharedBaths[0] && bathColW >= 6) {
     rooms.push(makeRoom(
       sharedBaths[0].name || "Bathroom 1",
       "bathroom",
+      bathColW,
       8,
-      8,
-      xRight + 12,
-      topPublicD,
+      leftW + centerW + bedAreaW,
+      topD,
       sharedBaths[0].id || "bathroom_1"
     ));
   }
 
-  if (halfBathProg) {
+  if (halfBathProg && bathColW >= 6) {
     rooms.push(makeRoom(
       halfBathProg.name || "Half Bath",
       "half_bath",
+      bathColW,
       6,
-      6,
-      xRight + 12,
-      topPublicD + 8,
+      leftW + centerW + bedAreaW,
+      topD + 8,
       halfBathProg.id || "half_bath_1"
+    ));
+  }
+
+  // Bottom band: patio left/center, garage right
+  const garageW = garageProg ? Math.min(20, rightW) : 0;
+  const garageX = W - garageW;
+
+  if (patioProg) {
+    rooms.push(makeRoom(
+      patioProg.name || "Covered Patio",
+      "patio",
+      W - garageW,
+      bottomD,
+      0,
+      topD + middleD,
+      patioProg.id || "patio"
+    ));
+  } else {
+    rooms.push(makeRoom(
+      "Open Area",
+      "hallway",
+      W - garageW,
+      bottomD,
+      0,
+      topD + middleD,
+      "open_area"
     ));
   }
 
@@ -637,84 +656,26 @@ function buildDeterministicPlan(requirements, program) {
       garageProg.name || "Garage",
       "garage",
       garageW,
-      garageD,
-      xGarage,
-      D - garageD,
+      bottomD,
+      garageX,
+      topD + middleD,
       garageProg.id || "garage"
     ));
   }
 
-  if (patioProg) {
-    const patioWidth = W - garageW;
-    rooms.push(makeRoom(
-      patioProg.name || "Covered Patio",
-      "patio",
-      patioWidth,
-      patioD,
-      0,
-      D - patioD,
-      patioProg.id || "patio"
-    ));
-  }
-
-  const usedRects = rooms.map(normalizeRoom);
-  const maxYUnderPatio = D - patioD;
-  const fillX = hallX + hallWidth;
-  const fillW = Math.max(6, xGarage - fillX);
-
-  const occupiedInCenterBottom = usedRects.filter(
-    (r) =>
-      r.x < fillX + fillW &&
-      r.x + r.width > fillX &&
-      r.y < maxYUnderPatio &&
-      r.y + r.depth > topPublicD
-  );
-
-  let cursorY = topPublicD;
-  while (cursorY < maxYUnderPatio - 6) {
-    const nextBlock = occupiedInCenterBottom
-      .filter((r) => r.y >= cursorY)
-      .sort((a, b) => a.y - b.y)[0];
-
-    if (!nextBlock) {
-      rooms.push(makeRoom(
-        "Open Area",
-        "hallway",
-        fillW,
-        maxYUnderPatio - cursorY,
-        fillX,
-        cursorY,
-        `open_area_${cursorY}`
-      ));
-      break;
-    }
-
-    if (nextBlock.y > cursorY) {
-      rooms.push(makeRoom(
-        "Open Area",
-        "hallway",
-        fillW,
-        nextBlock.y - cursorY,
-        fillX,
-        cursorY,
-        `open_area_${cursorY}`
-      ));
-    }
-
-    cursorY = Math.max(cursorY, nextBlock.y + nextBlock.depth);
-  }
+  const normalizedRooms = dedupeAndNormalizeRooms(rooms);
 
   return {
     house_size: `${requirements.totalSqft} sqft`,
     total_width: W,
     total_depth: D,
     floors: 1,
-    rooms: dedupeAndNormalizeRooms(rooms),
-    doors: buildDoorsFromRooms(dedupeAndNormalizeRooms(rooms), W, D),
-    windows: buildWindowsFromRooms(dedupeAndNormalizeRooms(rooms), W, D),
+    rooms: normalizedRooms,
+    doors: buildDoorsFromRooms(normalizedRooms, W, D),
+    windows: buildWindowsFromRooms(normalizedRooms, W, D),
     notes:
       program.notes ||
-      `Single-story conceptual layout with public spaces centered, master suite separated from secondary bedrooms, and service spaces placed deterministically.`,
+      "Single-story conceptual layout with public spaces at the front, private rooms in the middle, and patio/garage at the rear.",
   };
 }
 
