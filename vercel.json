@@ -2,12 +2,12 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/generate.js": {
+    "api/generate.cjs": {
       "maxDuration": 30
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/api/generate", "destination": "/api/generate.cjs" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
