@@ -42,6 +42,16 @@ Output this exact JSON structure:
 Valid room types: living, kitchen, bedroom, master_bedroom, bathroom, garage, office, hallway, pantry, dining, patio, mudroom, laundry, closet
 Make the layout realistic and proportional. Total room areas should approximately match stated square footage.`;
 
+// Helper to read raw body if req.body not pre-parsed
+function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -56,7 +66,20 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'API key not configured on server.' });
   }
 
-  const { description } = req.body || {};
+  // Parse body - handle both pre-parsed and raw
+  let description;
+  try {
+    let body = req.body;
+    if (!body || typeof body === 'string' || Object.keys(body).length === 0) {
+      const raw = await getRawBody(req);
+      body = JSON.parse(raw);
+    }
+    description = body.description;
+  } catch (e) {
+    console.error('Body parse error:', e.message);
+    return res.status(400).json({ error: 'Invalid request body.' });
+  }
+
   if (!description || typeof description !== 'string' || description.trim().length < 10) {
     return res.status(400).json({ error: 'Please provide a house description.' });
   }
