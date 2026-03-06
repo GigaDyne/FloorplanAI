@@ -68,7 +68,14 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: input }),
       })
-      const data = await res.json()
+      const text = await res.text()
+      let data
+      try {
+        data = JSON.parse(text)
+      } catch {
+        console.error('Non-JSON response:', text.slice(0, 300))
+        throw new Error(res.status === 504 ? 'Request timed out — please try again.' : `Server error (${res.status}). Please try again.`)
+      }
       if (!res.ok || data.error) {
         throw new Error(data.error || 'Server error')
       }
